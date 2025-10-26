@@ -1,0 +1,6 @@
+[
+  {
+    "drone_id": "drone-a",
+    "video": "http://52.230.105.110:8080/hls/drone-a.m3u8"
+  }
+]
