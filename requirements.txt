@@ -6,3 +6,4 @@ keras
 numpy
 opencv-python
 
+httpx==0.28.1
