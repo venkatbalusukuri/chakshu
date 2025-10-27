@@ -25,6 +25,11 @@ except Exception as e:
 
 alerts, drone_sources = {}, {}
 
+# --- Root route for Render health check ---
+@app.get("/")
+def root():
+    return {"message": "Backend is running", "status": "ok"}
+
 @app.get("/system/status")
 def get_system_status():
     status = "online" if model else "offline"
@@ -102,7 +107,8 @@ async def proxy_m3u8(drone_id: str):
             return Response(content=r.content, media_type="application/vnd.apple.mpegurl")
     except httpx.RequestError as e:
         print(f"Error proxying m3u8 for '{drone_id}': {e}")
-        return Response(content=f'{{"error": "Could not fetch stream manifest: {e}"}}', status_code=502, media_type="application/json")
+        return Response(content=f'{{"error": "Could not fetch stream manifest: {e}"}}',
+                        status_code=502, media_type="application/json")
 
 @app.get("/stream/{segment:path}")
 async def proxy_segment(segment: str):
@@ -115,4 +121,5 @@ async def proxy_segment(segment: str):
             return Response(content=r.content, media_type="video/MP2T")
     except httpx.RequestError as e:
         print(f"Error proxying segment '{segment}': {e}")
-        return Response(content=f'{{"error": "Could not fetch stream segment: {e}"}}', status_code=502, media_type="application/json")
+        return Response(content=f'{{"error": "Could not fetch stream segment: {e}"}}',
+                        status_code=502, media_type="application/json")
