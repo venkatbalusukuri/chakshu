@@ -1,12 +1,12 @@
 import cv2, threading, time, json, numpy as np, httpx, os
 from fastapi import FastAPI, Response
-from fastapi.middleware.cors import CORSMiddleware # Import CORS
+from fastapi.middleware.cors import CORSMiddleware
 from tensorflow import keras
 
 app = FastAPI()
 
-# --- FIX: Add CORS Middleware ---
-origins = ["*"]  # Allows any origin, suitable for development
+# --- CORS Middleware ---
+origins = ["*"]
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
@@ -14,8 +14,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-# --- END OF FIX ---
 
+# --- AI Model Loading ---
 try:
     model = keras.models.load_model("frame_cnn_model_one.keras")
     print("Keras model 'frame_cnn_model_one.keras' loaded successfully.")
@@ -24,6 +24,11 @@ except Exception as e:
     model = None
 
 alerts, drone_sources = {}, {}
+
+@app.get("/system/status")
+def get_system_status():
+    status = "online" if model else "offline"
+    return {"ai_model_status": status}
 
 def process_stream(drone_id, video_source):
     if not model:
@@ -36,6 +41,7 @@ def process_stream(drone_id, video_source):
         if not ret:
             print(f"[{drone_id}] Stream disconnected. Will attempt to reconnect in 5 seconds...")
             time.sleep(5)
+            cap.release()
             cap = cv2.VideoCapture(video_source)
             continue
         try:
