@@ -6,5 +6,9 @@
   {
     "drone_id": "drone-b",
     "video": "rtmp://52.230.105.110:1935/live/drone-b"
-  }
+  },
+  {
+    "drone_id":"drone-c",
+    "video":"rtmp://52.230.105.110:1935/live/drone-c"
+ }
 ]
