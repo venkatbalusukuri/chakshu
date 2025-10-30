@@ -23,7 +23,7 @@ except Exception as e:
     print(f"FATAL ERROR: Could not load Keras model. AI detection will be disabled. Error: {e}")
     model = None
 
-alerts, drone_sources = {}, {}
+alerts, drone_sources = {}, {}   # drone_sources will hold both RTMP + HLS
 
 # --- Root route for Render health check ---
 @app.get("/")
@@ -73,15 +73,17 @@ def start_all_drones():
     print(f"Found {len(drones)} drone(s) in '{drones_file}'.")
     for d in drones:
         drone_id = d.get("drone_id")
-        video_url = d.get("video")
-        if not drone_id or not video_url:
+        rtmp_url = d.get("rtmp_url")
+        hls_url = d.get("hls_url")
+        if not drone_id or not rtmp_url or not hls_url:
             print(f"Skipping invalid drone entry in config: {d}")
             continue
-        drone_sources[drone_id] = video_url
+        # Store both RTMP + HLS for later use
+        drone_sources[drone_id] = {"rtmp_url": rtmp_url, "hls_url": hls_url}
         print(f"Starting processing thread for drone '{drone_id}'...")
         threading.Thread(
             target=process_stream,
-            args=(drone_id, video_url),
+            args=(drone_id, rtmp_url),   # AI always uses RTMP
             daemon=True,
         ).start()
 
@@ -96,9 +98,10 @@ def get_alert(drone_id: str):
 
 @app.get("/stream/{drone_id}.m3u8")
 async def proxy_m3u8(drone_id: str):
-    url = drone_sources.get(drone_id)
-    if not url:
+    drone = drone_sources.get(drone_id)
+    if not drone:
         return Response(content='{"error": "Unknown drone_id"}', status_code=404, media_type="application/json")
+    url = drone["hls_url"]   # Always proxy HLS for frontend
     print(f"Proxying m3u8 request for '{drone_id}' to {url}")
     try:
         async with httpx.AsyncClient() as client:
