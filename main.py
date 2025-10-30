@@ -35,12 +35,12 @@ def get_system_status():
     status = "online" if model else "offline"
     return {"ai_model_status": status}
 
-def process_stream(drone_id, video_source):
+def process_stream(drone_id,rtmp_url):
     if not model:
         print(f"[{drone_id}] Skipping processing: ML model is not available.")
         alerts[drone_id] = {"alert": "Error: Model not loaded", "score": 0.0}
         return
-    cap = cv2.VideoCapture(video_source)
+    cap = cv2.VideoCapture(rtmp_url)
     while True:
         ret, frame = cap.read()
         if not ret:
