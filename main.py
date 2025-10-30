@@ -5,46 +5,45 @@ from tensorflow import keras
 
 app = FastAPI()
 
-# --- CORS Middleware ---
-origins = ["*"]
+# --- CORS ---
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# --- AI Model Loading ---
+# --- Load AI Model ---
 try:
     model = keras.models.load_model("frame_cnn_model_one.keras")
-    print("Keras model 'frame_cnn_model_one.keras' loaded successfully.")
+    print("✅ Model loaded successfully.")
 except Exception as e:
-    print(f"FATAL ERROR: Could not load Keras model. AI detection will be disabled. Error: {e}")
+    print(f"❌ Could not load model: {e}")
     model = None
 
-alerts, drone_sources = {}, {}   # drone_sources will hold both RTMP + HLS
+alerts, drone_sources = {}, {}
 
-# --- Root route for Render health check ---
+# --- Root + Health ---
 @app.get("/")
 def root():
-    return {"message": "Backend is running", "status": "ok"}
+    return {"message": "Backend running", "status": "ok"}
 
 @app.get("/system/status")
-def get_system_status():
-    status = "online" if model else "offline"
-    return {"ai_model_status": status}
+def get_status():
+    return {"ai_model_status": "online" if model else "offline"}
 
-def process_stream(drone_id,rtmp_url):
+# --- AI Processing Thread ---
+def process_stream(drone_id, video_source):
     if not model:
-        print(f"[{drone_id}] Skipping processing: ML model is not available.")
         alerts[drone_id] = {"alert": "Error: Model not loaded", "score": 0.0}
         return
-    cap = cv2.VideoCapture(rtmp_url)
+
+    cap = cv2.VideoCapture(video_source)
     while True:
         ret, frame = cap.read()
         if not ret:
-            print(f"[{drone_id}] Stream disconnected. Will attempt to reconnect in 5 seconds...")
+            print(f"[{drone_id}] ⚠️ No frames. Reconnecting in 5s...")
             time.sleep(5)
             cap.release()
             cap = cv2.VideoCapture(video_source)
@@ -58,59 +57,56 @@ def process_stream(drone_id,rtmp_url):
                 "score": float(pred),
             }
         except Exception as e:
-            print(f"[{drone_id}] Error during frame processing: {e}")
+            print(f"[{drone_id}] ❌ Error: {e}")
             alerts[drone_id] = {"alert": "Processing Error", "score": 0.0}
         time.sleep(1)
 
+# --- Startup: Load drones.json ---
 def start_all_drones():
     global drone_sources
-    drones_file = "drones.json"
-    if not os.path.exists(drones_file):
-        print(f"ERROR: '{drones_file}' not found. No drones will be started.")
+    if not os.path.exists("drones.json"):
+        print("❌ drones.json not found.")
         return
-    with open(drones_file) as f:
+    with open("drones.json") as f:
         drones = json.load(f)
-    print(f"Found {len(drones)} drone(s) in '{drones_file}'.")
+    print(f"📡 Found {len(drones)} drone(s).")
     for d in drones:
-        drone_id = d.get("drone_id")
-        rtmp_url = d.get("rtmp_url")
-        hls_url = d.get("hls_url")
-        if not drone_id or not rtmp_url or not hls_url:
-            print(f"Skipping invalid drone entry in config: {d}")
+        drone_id, video_source = d.get("drone_id"), d.get("video_source")
+        if not drone_id or not video_source:
+            print(f"⚠️ Skipping invalid entry: {d}")
             continue
-        # Store both RTMP + HLS for later use
-        drone_sources[drone_id] = {"rtmp_url": rtmp_url, "hls_url": hls_url}
-        print(f"Starting processing thread for drone '{drone_id}'...")
-        threading.Thread(
-            target=process_stream,
-            args=(drone_id, rtmp_url),   # AI always uses RTMP
-            daemon=True,
-        ).start()
+        drone_sources[drone_id] = video_source
+        print(f"🚀 Starting AI thread for '{drone_id}'")
+        threading.Thread(target=process_stream, args=(drone_id, video_source), daemon=True).start()
 
 @app.on_event("startup")
 def startup_event():
-    print("Application starting up. Initializing drone streams...")
+    print("🔄 Starting drone streams...")
     start_all_drones()
 
+# --- Alerts API ---
 @app.get("/alerts/{drone_id}")
 def get_alert(drone_id: str):
     return alerts.get(drone_id, {"alert": "No data", "score": 0.0})
 
+@app.get("/alerts/all")
+def get_all_alerts():
+    return alerts
+
+# --- Proxy API ---
 @app.get("/stream/{drone_id}.m3u8")
 async def proxy_m3u8(drone_id: str):
-    drone = drone_sources.get(drone_id)
-    if not drone:
-        return Response(content='{"error": "Unknown drone_id"}', status_code=404, media_type="application/json")
-    url = drone["hls_url"]   # Always proxy HLS for frontend
-    print(f"Proxying m3u8 request for '{drone_id}' to {url}")
+    video_source = drone_sources.get(drone_id)
+    if not video_source:
+        return Response(content='{"error": "Unknown drone_id"}',
+                        status_code=404, media_type="application/json")
     try:
         async with httpx.AsyncClient() as client:
-            r = await client.get(url)
+            r = await client.get(video_source)
             r.raise_for_status()
             return Response(content=r.content, media_type="application/vnd.apple.mpegurl")
-    except httpx.RequestError as e:
-        print(f"Error proxying m3u8 for '{drone_id}': {e}")
-        return Response(content=f'{{"error": "Could not fetch stream manifest: {e}"}}',
+    except Exception as e:
+        return Response(content=f'{{"error": "Could not fetch manifest: {e}"}}',
                         status_code=502, media_type="application/json")
 
 @app.get("/stream/{segment:path}")
@@ -122,7 +118,6 @@ async def proxy_segment(segment: str):
             r = await client.get(segment_url)
             r.raise_for_status()
             return Response(content=r.content, media_type="video/MP2T")
-    except httpx.RequestError as e:
-        print(f"Error proxying segment '{segment}': {e}")
-        return Response(content=f'{{"error": "Could not fetch stream segment: {e}"}}',
+    except Exception as e:
+        return Response(content=f'{{"error": "Could not fetch segment: {e}"}}',
                         status_code=502, media_type="application/json")
